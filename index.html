@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <title>新中物业工单系统</title>
+    <!-- Bootstrap 5 CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"></script>
+    <!-- 自定义样式 -->
+    <style>
+        :root {
+            --primary-color: #8B0000;
+            --secondary-color: #f0f0f0;
+            --success-color: #28a745;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+            --info-color: #17a2b8;
+        }
+        body {
+            background-color: var(--secondary-color);
+            padding-bottom: 70px;
+        }
+        .navbar {
+            background-color: var(--primary-color);
+        }
+        .card {
+            margin-bottom: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .status-badge {
+            font-size: 0.8rem;
+            padding: 5px 10px;
+        }
+        .status-pending {
+            background-color: var(--danger-color);
+            color: white;
+        }
+        .status-processing {
+            background-color: var(--info-color);
+            color: white;
+        }
+        .status-completed {
+            background-color: var(--success-color);
+            color: white;
+        }
+        .login-container {
+            max-width: 400px;
+            margin: 100px auto;
+        }
+        .login-logo {
+            text-align: center;
+            margin-bottom: 30px;
+            color: var(--primary-color);
+        }
+        .login-form {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            .login-container {
+                margin: 50px auto;
+                padding: 0 15px;
+            }
+        }
+        /* 微信浏览器适配 */
+        @supports (-webkit-overflow-scrolling: touch) {
+            body {
+                padding-bottom: 100px;
+            }
+            input, select, textarea {
+                font-size: 16px !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 登录页面 -->
+    <div id="loginPage" class="login-container">
+        <div class="login-logo">
+            <h1>新中物业工单系统</h1>
+        </div>
+        <div class="login-form">
+            <div class="mb-3">
+                <label for="username" class="form-label">用户名</label>
+                <input type="text" class="form-control" id="username" placeholder="请输入用户名">
+            </div>
+            <div class="mb-3">
+                <label for="password" class="form-label">密码</label>
+                <input type="password" class="form-control" id="password" placeholder="请输入密码">
+            </div>
+            <div id="loginError" class="alert alert-danger d-none" role="alert">
+                用户名或密码错误，请重试！
+            </div>
+            <button id="loginBtn" class="btn btn-primary w-100">登录</button>
+        </div>
+    </div>
+
+    <!-- 主应用页面 -->
+    <div id="appPage" class="d-none">
+        <!-- 导航栏 -->
+        <nav class="navbar navbar-expand-lg navbar-dark mb-4">
+            <div class="container">
+                <a class="navbar-brand" href="#">新中物业工单系统</a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav me-auto">
+                        <li class="nav-item">
+                            <a class="nav-link active" id="navOrders" href="#">工单列表</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="navNewOrder" href="#">新建工单</a>
+                        </li>
+                        <li class="nav-item d-none" id="navAdminPanel">
+                            <a class="nav-link" id="navAdmin" href="#">管理面板</a>
+                        </li>
+                    </ul>
+                    <span class="navbar-text me-3" id="userInfo"></span>
+                    <button class="btn btn-outline-light btn-sm" id="logoutBtn">退出登录</button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 主内容区 -->
+        <div class="container">
+            <!-- 工单列表页 -->
+            <div id="ordersPage">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h2>我的工单</h2>
+                    <div id="adminFilterContainer" class="d-none">
+                        <select id="statusFilter" class="form-select">
+                            <option value="all">全部状态</option>
+                            <option value="pending">待处理</option>
+                            <option value="processing">处理中</option>
+                            <option value="completed">已完成</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="ordersList" class="row"></div>
+                <div id="noOrders" class="alert alert-info">暂无工单记录，请点击"新建工单"创建。</div>
+            </div>
+
+            <!-- 新建工单页 -->
+            <div id="newOrderPage" class="d-none">
+                <h2 class="mb-4">创建维修工单</h2>
+                <form id="orderForm">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="company" class="form-label">申请单位</label>
+                            <input type="text" class="form-control" id="company" value="新中物业" readonly>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="applicant" class="form-label">经办人 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="applicant" required>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="phone" class="form-label">联络电话 <span class="text-danger">*</span></label>
+                            <input type="tel" class="form-control" id="phone" pattern="[0-9]{11}" required>
+                            <div class="form-text">请输入11位手机号码</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="location" class="form-label">地点选择 <span class="text-danger">*</span></label>
+                            <select class="form-select" id="location" required>
+                                <option value="" selected disabled>请选择地点</option>
+                                <option value="A座办公楼">A座办公楼</option>
+                                <option value="B座办公楼">B座办公楼</option>
+                                <option value="C座办公楼">C座办公楼</option>
+                                <option value="D座办公楼">D座办公楼</option>
+                                <option value="公共区域">公共区域</option>
+                                <option value="地下车库">地下车库</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="floor" class="form-label">所在楼层 <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="floor" min="-3" max="50" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="date" class="form-label">预约日期 <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" id="date" required>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="description" class="form-label">问题描述 <span class="text-danger">*</span></label>
+                        <textarea class="form-control" id="description" rows="4" required></textarea>
+                    </div>
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                        <button type="button" class="btn btn-secondary" id="cancelBtn">取消</button>
+                        <button type="submit" class="btn btn-primary">提交工单</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- 自定义脚本 -->
+    <script>
+        // 用户账户信息
+        const USERS = {
+            'yonghu': {
+                password: '1234',
+                role: 'user',
+                name: '普通用户'
+            },
+            'guanli': {
+                password: '0000',
+                role: 'admin',
+                name: '管理员'
+            }
+        };
+
+        // DOM 元素
+        const loginPage = document.getElementById('loginPage');
+        const appPage = document.getElementById('appPage');
+        const loginBtn = document.getElementById('loginBtn');
+        const loginError = document.getElementById('loginError');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const userInfo = document.getElementById('userInfo');
+        const navOrders = document.getElementById('navOrders');
+        const navNewOrder = document.getElementById('navNewOrder');
+        const navAdmin = document.getElementById('navAdmin');
+        const navAdminPanel = document.getElementById('navAdminPanel');
+        const ordersPage = document.getElementById('ordersPage');
+        const newOrderPage = document.getElementById('newOrderPage');
+        const ordersList = document.getElementById('ordersList');
+        const noOrders = document.getElementById('noOrders');
+        const orderForm = document.getElementById('orderForm');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const statusFilter = document.getElementById('statusFilter');
+        const adminFilterContainer = document.getElementById('adminFilterContainer');
+
+        // 当前登录用户
+        let currentUser = null;
+
+        // 初始化应用
+        function initApp() {
+            // 检查是否已登录
+            const savedUser = localStorage.getItem('currentUser');
+            if (savedUser) {
+                try {
+                    currentUser = JSON.parse(savedUser);
+                    showApp();
+                } catch (e) {
+                    localStorage.removeItem('currentUser');
+                    showLogin();
+                }
+            } else {
+                showLogin();
+            }
+
+            // 绑定事件
+            loginBtn.addEventListener('click', handleLogin);
+            logoutBtn.addEventListener('click', handleLogout);
+            navOrders.addEventListener('click', showOrdersPage);
+            navNewOrder.addEventListener('click', showNewOrderPage);
+            navAdmin.addEventListener('click', showAdminPage);
+            orderForm.addEventListener('submit', handleOrderSubmit);
+            cancelBtn.addEventListener('click', showOrdersPage);
+            statusFilter.addEventListener('change', renderOrders);
+        }
+
+        // 显示登录页面
+        function showLogin() {
+            loginPage.classList.remove('d-none');
+            appPage.classList.add('d-none');
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            loginError.classList.add('d-none');
+        }
+
+        // 显示应用主页
+        function showApp() {
+            loginPage.classList.add('d-none');
+            appPage.classList.remove('d-none');
+            userInfo.textContent = `${currentUser.name} (${currentUser.username})`;
+            
+            // 根据用户角色显示/隐藏管理面板
+            if (currentUser.role === 'admin') {
+                navAdminPanel.classList.remove('d-none');
+                adminFilterContainer.classList.remove('d-none');
+            } else {
+                navAdminPanel.classList.add('d-none');
+                adminFilterContainer.classList.add('d-none');
+            }
+            
+            showOrdersPage();
+        }
+
+        // 处理登录
+        function handleLogin() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            if (USERS[username] && USERS[username].password === password) {
+                currentUser = {
+                    username: username,
+                    role: USERS[username].role,
+                    name: USERS[username].name
+                };
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                showApp();
+            } else {
+                loginError.classList.remove('d-none');
+            }
+        }
+
+        // 处理登出
+        function handleLogout() {
+            localStorage.removeItem('currentUser');
+            currentUser = null;
+            showLogin();
+        }
+
+        // 显示工单列表页
+        function showOrdersPage() {
+            navOrders.classList.add('active');
+            navNewOrder.classList.remove('active');
+            navAdmin.classList.remove('active');
+            ordersPage.classList.remove('d-none');
+            newOrderPage.classList.add('d-none');
+            renderOrders();
+        }
+
+        // 显示新建工单页
+        function showNewOrderPage() {
+            navOrders.classList.remove('active');
+            navNewOrder.classList.add('active');
+            navAdmin.classList.remove('active');
+            ordersPage.classList.add('d-none');
+            newOrderPage.classList.remove('d-none');
+        }
+
+        // 显示管理面板
+        function showAdminPage() {
+            if (currentUser.role !== 'admin') return;
+            
+            navOrders.classList.remove('active');
+            navNewOrder.classList.remove('active');
+            navAdmin.classList.add('active');
+            ordersPage.classList.remove('d-none');
+            newOrderPage.classList.add('d-none');
+            renderOrders();
+        }
+
+        // 处理工单提交
+        async function handleOrderSubmit(e) {
+            e.preventDefault();
+            
+            // 获取表单数据
+            const formData = {
+                id: await generateOrderId(),
+                company: document.getElementById('company').value,
+                applicant: document.getElementById('applicant').value,
+                phone: document.getElementById('phone').value,
+                location: document.getElementById('location').value,
+                floor: document.getElementById('floor').value,
+                date: document.getElementById('date').value,
+                description: document.getElementById('description').value,
+                status: 'pending',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                createdBy: currentUser.username
+            };
+            
+            // 保存工单
+            await saveOrder(formData);
+            
+            // 重置表单并返回工单列表
+            orderForm.reset();
+            document.getElementById('company').value = '新中物业';
+            showOrdersPage();
+            
+            // 显示成功提示
+            alert('工单提交成功！');
+        }
+
+        // 生成工单ID
+        async function generateOrderId() {
+            const date = new Date();
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const dateStr = `${year}${month}${day}`;
+            
+            // 获取当天的工单数量
+            try {
+                const snapshot = await db.collection('orders')
+                    .where('id', '>=', `XZ-${dateStr}`)
+                    .where('id', '<', `XZ-${dateStr}\uf8ff`)
+                    .get();
+                
+                const orderNum = String(snapshot.docs.length + 1).padStart(3, '0');
+                return `XZ-${dateStr}-${orderNum}`;
+            } catch (error) {
+                console.error("生成工单ID时出错：", error);
+                // 如果出错，使用时间戳作为备用
+                return `XZ-${dateStr}-${Date.now().toString().slice(-3)}`;
+            }
+        }
+
+        // 保存工单
+        function saveOrder(order) {
+            db.collection('orders').add(order);
+        }
+        // 读取全部工单
+        async function getAllOrders() {
+            const snapshot = await db.collection('orders').get();
+            return snapshot.docs.map(doc => doc.data());
+        }
+
+        // 更新工单状态
+        function updateOrderStatus(orderId, newStatus) {
+            const orders = getAllOrders();
+            const orderIndex = orders.findIndex(order => order.id === orderId);
+            
+            if (orderIndex !== -1) {
+                orders[orderIndex].status = newStatus;
+                orders[orderIndex].updatedAt = new Date().toISOString();
+                localStorage.setItem('orders', JSON.stringify(orders));
+                renderOrders();
+            }
+        }
+
+        // 渲染工单列表
+        async function renderOrders() {
+            try {
+                let orders = await getAllOrders();
+                const selectedStatus = statusFilter.value;
+                
+                // 根据用户角色和筛选条件过滤工单
+                if (currentUser.role === 'user') {
+                    // 普通用户只能看到自己的工单
+                    orders = orders.filter(order => order.createdBy === currentUser.username);
+                } else if (selectedStatus !== 'all') {
+                    // 管理员可以按状态筛选
+                    orders = orders.filter(order => order.status === selectedStatus);
+                }
+                
+                // 按创建时间倒序排序
+                orders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                
+                // 清空工单列表
+                ordersList.innerHTML = '';
+                
+                // 显示工单或无工单提示
+                if (orders.length > 0) {
+                    noOrders.classList.add('d-none');
+                    orders.forEach(order => {
+                        ordersList.appendChild(createOrderCard(order));
+                    });
+                } else {
+                    noOrders.classList.remove('d-none');
+                }
+            } catch (error) {
+                console.error("渲染工单列表时出错：", error);
+                alert("加载工单列表时出错，请刷新页面重试！");
+            }
+        }
+
+        // 创建工单卡片
+        function createOrderCard(order) {
+            const col = document.createElement('div');
+            col.className = 'col-md-6 col-lg-4';
+            
+            // 状态标签样式
+            let statusClass = '';
+            let statusText = '';
+            let statusActions = '';
+            
+            switch (order.status) {
+                case 'pending':
+                    statusClass = 'status-pending';
+                    statusText = '待处理';
+                    if (currentUser.role === 'admin') {
+                        statusActions = `<button class="btn btn-sm btn-info mt-2" onclick="updateOrderStatus('${order.id}', 'processing')">标记为处理中</button>`;
+                    }
+                    break;
+                case 'processing':
+                    statusClass = 'status-processing';
+                    statusText = '处理中';
+                    if (currentUser.role === 'admin') {
+                        statusActions = `<button class="btn btn-sm btn-success mt-2" onclick="updateOrderStatus('${order.id}', 'completed')">标记为已完成</button>`;
+                    }
+                    break;
+                case 'completed':
+                    statusClass = 'status-completed';
+                    statusText = '已完成';
+                    break;
+            }
+            
+            // 格式化日期
+            const createdDate = new Date(order.createdAt).toLocaleString('zh-CN');
+            
+            col.innerHTML = `
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>${order.id}</span>
+                        <span class="badge ${statusClass} status-badge">${statusText}</span>
+                    </div>
+                    <div class="card-body">
+                        <h5 class="card-title">${order.location} ${order.floor}楼</h5>
+                        <p class="card-text">${order.description}</p>
+                        <div class="d-flex justify-content-between">
+                            <small class="text-muted">申请人: ${order.applicant}</small>
+                            <small class="text-muted">电话: ${order.phone}</small>
+                        </div>
+                        <div class="d-flex justify-content-between mt-2">
+                            <small class="text-muted">预约日期: ${order.date}</small>
+                            <small class="text-muted">创建时间: ${createdDate}</small>
+                        </div>
+                        ${statusActions}
+                    </div>
+                </div>
+            `;
+            
+            return col;
+        }
+
+        // 初始化应用
+        document.addEventListener('DOMContentLoaded', initApp);
+
+        // 全局函数，用于在HTML中调用
+        window.updateOrderStatus = updateOrderStatus;
+    </script>
+</body>
+</html>
+const firebaseConfig = { // 這裡填你的配置 };
+const app = firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
